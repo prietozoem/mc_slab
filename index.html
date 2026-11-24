@@ -12,6 +12,9 @@
     <h1 data-i18n="app.title"></h1>
     <p class="sub" data-i18n="app.subtitle"></p>
   </div>
+  <div class="segtoggle" id="exToggle" role="group" aria-label="Example">
+    <button data-ex="slab" class="on" data-i18n="ex.slab"></button><button data-ex="sphere" data-i18n="ex.sphere"></button>
+  </div>
   <div class="lang" role="group" aria-label="Language">
     <button data-lang="en" class="on">EN</button><button data-lang="es">ES</button>
   </div>
@@ -20,7 +23,7 @@
 <main class="layout">
   <section class="panel" id="controls">
     <h2 data-i18n="ctl.title"></h2>
-    <div class="seglabel" data-i18n="ctl.particle"></div>
+    <div class="seglabel" id="particleLabel" data-i18n="ctl.particle"></div>
     <div class="segtoggle" id="particleToggle" role="group">
       <button data-particle="photon" class="on" data-i18n="ctl.photon"></button><button data-particle="neutron" data-i18n="ctl.neutron"></button>
     </div>
@@ -33,7 +36,7 @@
       <input id="thickness" type="number" min="0.001" step="any" value="4"></label>
     <div class="info" id="mfpInfo"></div>
     <label class="radio" id="tslRow" hidden><input type="checkbox" id="tslChk" checked> <span data-i18n="ctl.tsl"></span></label>
-    <label><span data-i18n="ctl.srctype"></span>
+    <label id="srctypeRow"><span data-i18n="ctl.srctype"></span>
       <select id="srctype"><option value="beam" data-i18n="ctl.src.beam"></option><option value="line" data-i18n="ctl.src.line"></option></select></label>
     <label id="srclenRow" hidden><span data-i18n="ctl.srclen"></span>
       <input id="srclen" type="number" min="0.001" step="any" value="4"></label>
@@ -77,6 +80,17 @@
     <canvas id="spec"></canvas>
   </section>
 </main>
+
+<section class="panel wide" id="fluxPanel" hidden>
+  <div class="panelhead">
+    <h2 data-i18n="flux.title"></h2>
+    <div class="scaletoggle" id="fluxScale" role="group">
+      <button data-yscale="lin" class="on" data-i18n="flux.lin"></button><button data-yscale="log" data-i18n="flux.log"></button>
+    </div>
+  </div>
+  <canvas id="fluxSpec"></canvas>
+  <p class="hint" data-i18n="flux.note"></p>
+</section>
 
 <section class="notes">
   <h3 data-i18n="foot.title"></h3>

@@ -97,3 +97,14 @@ table.tally .sw { display: inline-block; width: 9px; height: 9px; border-radius:
 .segtoggle button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .info.warn { color: #b3261e; margin: 0 0 8px; } .info.warn[hidden] { display: none; }
 #tslRow[hidden] { display: none; }
+
+/* example selector (header) and the sphere flux panel */
+[hidden] { display: none !important; }
+#exToggle { margin: 0 auto; flex: none; }
+#exToggle button { padding: 8px 16px; font-weight: 600; }
+.panel.wide { margin: 0 20px 12px; }
+#fluxSpec { width: 100%; height: 340px; display: block; }
+.scaletoggle button { padding: 3px 10px; font-size: 12px; border-radius: 0; border-left-width: 0; }
+.scaletoggle button:first-child { border-radius: 6px 0 0 6px; border-left-width: 1px; } .scaletoggle button:last-child { border-radius: 0 6px 6px 0; }
+.scaletoggle button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+@media (max-width: 900px) { .top { flex-wrap: wrap; } #exToggle { order: 3; width: 100%; margin: 0; } }

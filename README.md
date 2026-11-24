@@ -1,4 +1,4 @@
-# Monte Carlo transport: slab shielding (example 1, photons or neutrons)
+# Monte Carlo transport: slab shielding (example 1) and neutron point source in a water sphere (example 2)
 
 A standalone web app (plain HTML/CSS/JS, no build step, no dependencies) that teaches the basics of Monte Carlo radiation transport.
 A parallel beam (or a line source) of monoenergetic photons **or neutrons** hits an infinite slab and the transmitted flux is tallied. Choose the particle with the *Photons / Neutrons* buttons at the top of the control panel.
@@ -53,9 +53,20 @@ Method: dσ/dE′ = σ_b·A₀/(4E) · e^(−β/2) ∫ S(α,β) dα with σ_b = 
 
 Nuclides: H-1, C (nat), O-16, Na-23, Mg-24, Al-27, Si-28/29/30, K-39/41, Ca-40, Fe-54/56/57/58, W-182/183/184/186, Pb-204/206/207/208. Data thinned in (ln E, ln σ) to about 7 %.
 
+## Example 2: neutron point source in a water sphere
+
+The buttons at the top of the page switch between **Example 1 (slab)** and **Example 2 (point source in a sphere)**; `index.html#sphere` opens example 2 directly, which is convenient for a link to students. Example 2 is neutrons only (ENDF/B-VII.1, same data and physics as the neutron slab, including the optional S(α,β) law for H in water).
+
+- **Geometry**: homogeneous sphere of radius R (default water, 30 cm) in vacuum, isotropic point source of monoenergetic neutrons at the centre (cos θ = 2ξ₁ − 1, φ = 2πξ₂). A neutron that leaves the sphere never returns. The 2D views are projections of the 3D paths on a plane; there is also the 3D view with orbit camera. The step-by-step window and the automatic mode work as in example 1.
+- **Bottom plot, flux spectrum in the sphere**: volume-averaged scalar flux per unit lethargy, E·φ(E) in 1/cm² per source neutron, from the **track-length estimator**: every flight adds its length (clipped at the surface) to the energy bin of the neutron during that flight, and the sum over histories is divided by (V · N · Δln E). The ±1σ bars come from the history-to-history scatter of the bin scores (`fl` and `fl2` in the tally). Linear or log y axis. Dashed grey line: kT = 0.0253 eV; red line: source energy. In the plot per unit lethargy the slowing-down region is flat (1/E flux) and a thermal neutron population is a Maxwellian peak at about 2kT (E·φ ∝ E² e^(−E/kT)); with the S(α,β) law switched off the neutrons pile up at the 0.0253 eV floor instead.
+- **Right-hand plot**: energy spectrum of the neutrons that leak out of the sphere (collided ones, per unit lethargy), with the uncollided fraction marked; the table gives the leaked/absorbed fractions, the analytic uncollided leakage e^(−Σt·R), the mean number of collisions per history and the mean flux in the sphere.
+- **Checks** (`node test/test_sphere.js`): distance to the surface; in a nearly empty sphere every neutron flies a straight line of length R, so the mean flux must equal R/V = 3/(4πR²) and sit in the bin of E₀ (exact); leaked + absorbed = N; uncollided leakage = e^(−Σt·R); the track-length estimator reproduces the collision count; isotropy of the source (⟨μ⟩ = 0, ⟨μ²⟩ = 1/3); generator = fast loop.
+
 ## Tests
 
 `node test/test_neutron.js [path/to/data_n.js]` checks the neutron engine (uncollided = exp(−Σt·T), elastic kinematics, thermal floor, generator = fast loop, ...). Without an argument it uses the small subset `test/data_n_mini.js`; pass `js/data_n.js` to also test every material.
+
+`node test/test_sphere.js [path/to/data_n.js]` checks the sphere example (see above).
 
 `node test/test_tsl.js [js/data_tsl.js]` checks the thermal scattering code (cross section against the analytic free-gas formula with a synthetic table, detailed balance of the scattering chain, kinematics, conservation, generator = fast loop); pass the real file to run the checks that apply to it.
 
@@ -76,6 +87,7 @@ js/app.js           user interface
 test/test_engine.js engine tests (Node)
 test/test_neutron.js neutron tests (Node); test/data_n_mini.js tiny test data
 test/test_tsl.js    S(alpha,beta) tests (Node)
+test/test_sphere.js sphere example tests (Node)
 ```
 
 ## Data source

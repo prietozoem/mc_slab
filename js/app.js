@@ -1,8 +1,12 @@
-/* UI for the slab shielding Monte Carlo example. */
+/* UI for the Monte Carlo transport examples: 1 = slab shielding (photons / neutrons), 2 = neutron point source in a sphere. */
 (function () {
   'use strict';
   var MC = window.MCEngine, I18 = window.I18N;
-  function t(k, v) { var nk = k + '.n'; return I18.t(S.particle === 'neutron' && I18.has(nk) ? nk : k, v); }   // neutron variant of a string when it exists
+  function t(k, v) {                                                    // sphere variant (.s), else neutron variant (.n), else the base string
+    var sk = k + '.s', nk = k + '.n';
+    if (S.example === 'sphere' && I18.has(sk)) return I18.t(sk, v);
+    return I18.t(S.particle === 'neutron' && I18.has(nk) ? nk : k, v);
+  }
   var $ = function (id) { return document.getElementById(id); };
 
   var PH_COL = ['#7e57c2', '#1e88e5', '#e53935', '#00838f'], N_COL = ['#1e88e5', '#8e24aa', '#e53935', '#00838f'];
@@ -14,16 +18,18 @@
     RX_COL = n ? N_COL : PH_COL; RX_KEY = n ? ['el', 'inel', 'cap', 'oth'] : ['coh', 'inc', 'pe', 'pair'];
     $('geomLegend').dataset.lang = '';
   }
-  var OUT_COL = { T: '#2e7d32', R: '#ef6c00', A: '#6b7280', C: '#6b7280' };
+  var OUT_COL = { T: '#2e7d32', R: '#ef6c00', L: '#2e7d32', A: '#6b7280', C: '#6b7280' };
   var MAT_ORDER = ['water', 'aluminum', 'iron', 'concrete', 'tungsten', 'lead'];
 
   var S = {
+    example: 'slab', fluxLog: false, params: { slab: null, sphere: null },
     particle: 'photon', mat: null, sim: null, E0: 1, T: 2, nHist: 20000, seed: 12345, mode: 'auto', view: '2d',
     running: false, raf: 0, timer: 0, gen: null, ev: null, current: null, finished: [],
     winRender: null
   };
   var winPlot = new Plot($('winCanvas'));
   var specPlot = new Plot($('spec'));
+  var fluxPlot = new Plot($('fluxSpec'));
 
   /* ---------------- helpers ---------------- */
   function fmt(v, p) {
@@ -46,12 +52,12 @@
 
   /* ---------------- setup / reset ---------------- */
   function readParams() {
-    var neu = S.particle === 'neutron';
+    var neu = S.particle === 'neutron', sph = S.example === 'sphere';
     S.E0 = neu ? clamp(parseFloat($('energy').value) || 2, 1e-11, 20) : clamp(parseFloat($('energy').value) || 1, 0.001, 100);
     S.T = Math.max(0.001, parseFloat($('thickness').value) || 1);
     S.nHist = Math.max(1, Math.floor(parseFloat($('nhist').value) || 1000));
     S.seed = Math.max(1, Math.floor(parseFloat($('seed').value) || 1));
-    S.srcType = $('srctype').value;
+    S.srcType = sph ? 'beam' : $('srctype').value;
     S.srcAxis = 'y';                                   // the line lies on the entrance face; code axis y is displayed as X
     S.srcX0 = 0;
     S.srcLen = S.srcType === 'line' ? Math.max(0.001, parseFloat($('srclen').value) || 1) : 0;
@@ -65,7 +71,7 @@
       try { S.mat = MC.makeNeutronMaterial(key, window.XCOM[key].rho, window.XCOM[key].name, window.NXS, { tsl: wantTsl ? window.TSL_H2O : null }); if (!S.tslLoading) showMsg(''); }
       catch (e) {
         showMsg(t('msg.missing', { m: (e.missing || [e.message]).join(', ') }));
-        S.particle = 'photon'; S.E0 = 1; $('energy').value = 1; syncParticleUI(); setTables();
+        S.particle = 'photon'; S.example = 'slab'; S.E0 = 1; $('energy').value = 1; syncExampleUI(); syncParticleUI(); setTables();
         S.mat = new MC.Material(key, window.XCOM[key]);
       }
     } else S.mat = new MC.Material(key, window.XCOM[key]);
@@ -103,6 +109,40 @@
     else go();
   }
 
+  /* ---------------- example selector (1 = slab, 2 = point source in a sphere) ---------------- */
+  var EX_DEFAULT = {
+    slab: { particle: 'photon', material: 'lead', energy: 1, thickness: 4, nhist: 20000, tsl: true },
+    sphere: { particle: 'neutron', material: 'water', energy: 2, thickness: 30, nhist: 5000, tsl: true }
+  };
+  function grabInputs() {
+    return { particle: S.particle, material: $('material').value, energy: $('energy').value, thickness: $('thickness').value, nhist: $('nhist').value, tsl: $('tslChk').checked };
+  }
+  function applyInputs(p) {
+    $('material').value = p.material; $('energy').value = p.energy; $('thickness').value = p.thickness; $('nhist').value = p.nhist; $('tslChk').checked = !!p.tsl;
+  }
+  function syncExampleUI() {
+    var sph = S.example === 'sphere';
+    document.querySelectorAll('#exToggle button').forEach(function (b) { b.classList.toggle('on', b.dataset.ex === S.example); });
+    $('particleLabel').hidden = $('particleToggle').hidden = sph;      // the sphere example is neutrons only
+    $('srctypeRow').hidden = sph;                                      // the source is always an isotropic point at the centre
+    $('fluxPanel').hidden = !sph;
+    $('geomLegend').dataset.lang = '';
+  }
+  function setExample(ex) {
+    if (ex === S.example) return;
+    var target = S.params[ex] || EX_DEFAULT[ex];
+    function go() {
+      stopAll();
+      S.params[S.example] = grabInputs();
+      S.example = ex; S.sim = null; S.particle = target.particle; setTables();
+      cam2.zoom = 1; cam2.px = 0; cam2.py = 0;
+      showMsg(''); syncExampleUI(); syncParticleUI(); applyLang(); applyInputs(target); resetSim();
+      try { history.replaceState(null, '', ex === 'sphere' ? '#sphere' : location.pathname + location.search); } catch (e) { /* file:// or sandboxed */ }
+    }
+    if (target.particle === 'neutron') loadNeutronData(function (ok) { if (ok) go(); else showMsg(t('msg.nodata')); });
+    else go();
+  }
+
   function stopAll() {
     S.running = false; cancelAnimationFrame(S.raf);
     clearInterval(S.timer); S.timer = 0;
@@ -112,9 +152,9 @@
 
   function resetSim() {
     stopAll(); readParams();
-    S.sim = MC.makeSim({ material: S.mat, E0: S.E0, T: S.T, seed: S.seed, nbins: S.particle === 'neutron' ? 200 : 100 });
-    MC.configureSource(S.sim, S.srcLen, S.srcAxis, S.srcX0);
-    S.srcLen = S.sim.srcLen; S.srcX0 = S.sim.srcX0;                       // clamped values
+    var sph = S.example === 'sphere';
+    S.sim = MC.makeSim({ material: S.mat, E0: S.E0, T: S.T, R: S.T, geom: sph ? 'sphere' : 'slab', seed: S.seed, nbins: S.particle === 'neutron' ? 200 : 100 });
+    if (!sph) { MC.configureSource(S.sim, S.srcLen, S.srcAxis, S.srcX0); S.srcLen = S.sim.srcLen; S.srcX0 = S.sim.srcX0; }   // clamped values
     
     S.gen = null; S.ev = null; S.current = null; S.finished = []; S.winRender = null;
     if (S.mode === 'step') showReady(); else $('win').hidden = true;
@@ -134,13 +174,17 @@
     return { a: [x0, 0, -h], b: [x0, 0, h] };
   }
 
+  function view2(W, H) {                                          // scale [px/cm] at zoom 1 and screen x of the origin
+    return S.example === 'sphere' ? { base: 0.41 * Math.min(W, H) / S.T, x0: W / 2 } : { base: W * 0.38 / S.T, x0: W * 0.31 };
+  }
   function drawGeom2D(proposal) {
     var cv = $('geom'), c = sizeCanvas(cv), g = c.g, W = c.W, H = c.H;
     if (!W || !H || !S.sim) return;
-    var T = S.T, sx = W * 0.38 / T * cam2.zoom, x0 = W * 0.31 + cam2.px, zv = S.view === '2dz';       // zv: vertical axis is z instead of y
+    var T = S.T, sph = S.example === 'sphere', vp = view2(W, H), sx = vp.base * cam2.zoom, x0 = vp.x0 + cam2.px, zv = S.view === '2dz';       // zv: vertical axis is z instead of y
     function X(x) { return x0 + x * sx; }
     function Y(y) { return H / 2 + cam2.py - y * sx; }
     function PV(pt) { return zv ? (pt[3] || 0) : pt[1]; }
+    if (sph) sphereBackdrop(); else {
     // slab
     g.fillStyle = '#e8edf3'; g.fillRect(X(0), 0, T * sx, H);
     g.strokeStyle = '#8a97a8'; g.lineWidth = 1.5; g.setLineDash([]);
@@ -179,6 +223,24 @@
       g.fillText(t('geom.beam') + ' ' + fmt(S.E0, 3) + ' MeV', 8, Y(0) - 8);
     }
 
+    }
+    function sphereBackdrop() {
+      var cx = X(0), cy = Y(0), r = T * sx;
+      g.fillStyle = '#e8edf3'; g.strokeStyle = '#8a97a8'; g.lineWidth = 1.5; g.setLineDash([]);
+      g.beginPath(); g.arc(cx, cy, r, 0, 6.2832); g.fill(); g.stroke();
+      g.fillStyle = '#4b5563'; g.font = '12px system-ui, sans-serif'; g.textAlign = 'center';
+      g.fillText(t('geom.sphere') + ': ' + matName(), W / 2, 16);
+      g.fillText(t('geom.scale', { T: fmt(T, 3) }), W / 2, H - 8);
+      g.setLineDash([4, 3]); g.lineWidth = 1; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + r, cy); g.stroke(); g.setLineDash([]);
+      g.fillText('R', cx + r / 2, cy - 5);
+      g.fillStyle = '#8a97a8'; g.textAlign = 'right'; g.fillText(t('geom.hint2d'), W - 8, 34); g.textAlign = 'left';
+    }
+    function sphereSource() {
+      g.fillStyle = '#BA7517'; g.strokeStyle = '#fff'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(X(0), Y(0), 6, 0, 6.2832); g.fill(); g.stroke();
+      g.fillStyle = '#8a5a00'; g.font = '12px system-ui, sans-serif'; g.textAlign = 'left';
+      g.fillText(t('geom.src.s') + ', ' + fmt(S.E0, 3) + ' MeV', 8, 18);
+    }
     function drawPath(p, out, ux, uy, alpha, markers, width) {
       var pts = p.path; if (!pts || pts.length < 1) return;
       g.globalAlpha = alpha; g.strokeStyle = OUT_COL[out] || '#0b3d91'; g.lineWidth = width;
@@ -186,10 +248,10 @@
       for (var i = 0; i < pts.length; i++) { if (i) g.lineTo(X(pts[i][0]), Y(PV(pts[i]))); else g.moveTo(X(pts[i][0]), Y(PV(pts[i]))); }
       g.stroke();
       var last = pts[pts.length - 1];
-      if ((out === 'T' || out === 'R') && ux !== undefined) {           // outgoing ray after leaving the slab
+      if ((out === 'T' || out === 'R' || out === 'L') && ux !== undefined) {           // outgoing ray after leaving the slab / sphere
         var n = Math.hypot(ux, uy);
         if (n > 1e-6) {
-          var L = 0.35 * T * sx;
+          var L = (sph ? 0.2 : 0.35) * T * sx;
           g.setLineDash([3, 3]); g.beginPath(); g.moveTo(X(last[0]), Y(PV(last)));
           g.lineTo(X(last[0]) + ux / n * L, Y(PV(last)) - uy / n * L); g.stroke(); g.setLineDash([]);
         }
@@ -228,13 +290,14 @@
         g.fillStyle = '#ffb300'; g.beginPath(); g.arc(X(xe), Y(ye), 4, 0, 6.2832); g.fill();
       }
     }
+    if (sph) sphereSource();
   }
 
   function updateLegend() {
     var L = $('geomLegend');
     if (!L.dataset.lang || L.dataset.lang !== lang()) {
       L.dataset.lang = lang();
-      L.innerHTML = ['T', 'R', 'A'].map(function (k) { return '<span><i style="background:' + OUT_COL[k] + '"></i>' + t('leg.' + k) + '</span>'; }).join('') +
+      L.innerHTML = (S.example === 'sphere' ? ['L', 'A'] : ['T', 'R', 'A']).map(function (k) { return '<span><i style="background:' + OUT_COL[k] + '"></i>' + t('leg.' + k) + '</span>'; }).join('') +
         RX_KEY.map(function (k, i) { return '<span><b style="background:' + RX_COL[i] + '"></b>' + t('rx.' + k + '.s') + '</span>'; }).join('');
     }
   }
@@ -252,19 +315,22 @@
   function drawGeom3D(proposal) {
     var cv = $('geom'), c = sizeCanvas(cv), g = c.g, W = c.W, H = c.H;
     if (!W || !H || !S.sim) return;
-    var T = S.T, L = T * 2.5, k;
+    var T = S.T, L = T * 2.5, k, sph = S.example === 'sphere', cx0 = sph ? 0 : T / 2;
     function scan(p) {
       var pts = p.path || []; for (var i = 0; i < pts.length; i++) L = Math.max(L, Math.abs(pts[i][1]) * 1.15, Math.abs(pts[i][3] || 0) * 1.15);
     }
-    S.finished.forEach(scan); if (S.current) scan(S.current.ph);
-    L = Math.max(L, S.srcLen / 2 * 1.15); L = Math.min(L, Math.max(T * 12, S.srcLen));                                  // half-size of the drawn slab in y, z
-    var rad = Math.hypot(1.15 * T, L, L), scale = 0.46 * Math.min(W, H) / rad * cam.zoom, D = rad * 5;
+    if (sph) L = T; else {
+      S.finished.forEach(scan); if (S.current) scan(S.current.ph);
+      L = Math.max(L, S.srcLen / 2 * 1.15); L = Math.min(L, Math.max(T * 12, S.srcLen));
+    }                                  // half-size of the drawn slab in y, z
+    var rad = sph ? 1.25 * T : Math.hypot(1.15 * T, L, L), scale = 0.46 * Math.min(W, H) / rad * cam.zoom, D = rad * 5;
     var cyw = Math.cos(cam.yaw), syw = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     function P(x, y, z) {
-      var X = x - T / 2, x1 = X * cyw + z * syw, z1 = -X * syw + z * cyw;
+      var X = x - cx0, x1 = X * cyw + z * syw, z1 = -X * syw + z * cyw;
       var y2 = y * cp - z1 * sp, z2 = y * sp + z1 * cp, f = D / (D - z2);
       return [W / 2 + x1 * scale * f, H / 2 - y2 * scale * f, z2];
     }
+    if (sph) sphere3(); else {
     // slab: 6 faces sorted far -> near
     var C = [];
     [0, T].forEach(function (x) { [-L, L].forEach(function (y) { [-L, L].forEach(function (z) { C.push(P(x, y, z)); }); }); });
@@ -324,6 +390,31 @@
       g.fillText(t('geom.beam') + ' ' + fmt(S.E0, 3) + ' MeV', b0[0], b0[1] - 8);
     }
 
+    }
+    function sphere3() {
+      var c0 = P(0, 0, 0), rs = T * scale * D / Math.sqrt(D * D - T * T), n = 72, a, k2;
+      g.fillStyle = 'rgba(30,136,229,.10)'; g.strokeStyle = '#8a97a8'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(c0[0], c0[1], rs, 0, 6.2832); g.fill(); g.stroke();
+      g.strokeStyle = 'rgba(100,116,139,.55)'; g.lineWidth = 1;
+      for (k2 = 0; k2 < 3; k2++) {                              // three orthogonal great circles
+        g.beginPath();
+        for (a = 0; a <= n; a++) {
+          var c = T * Math.cos(2 * Math.PI * a / n), sn = T * Math.sin(2 * Math.PI * a / n);
+          var q = k2 === 0 ? P(0, c, sn) : k2 === 1 ? P(c, 0, sn) : P(c, sn, 0);
+          if (a) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]);
+        }
+        g.stroke();
+      }
+      g.font = '12px system-ui, sans-serif'; g.fillStyle = '#4b5563'; g.textAlign = 'center';
+      g.fillText(t('geom.sphere') + ': ' + matName() + '  (R = ' + fmt(T, 3) + ' cm)', W / 2, H - 8);
+      g.textAlign = 'left';
+    }
+    function sphereSrc3() {
+      var c0 = P(0, 0, 0);
+      g.fillStyle = '#BA7517'; g.strokeStyle = '#fff'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(c0[0], c0[1], 6, 0, 6.2832); g.fill(); g.stroke();
+      g.fillStyle = '#8a5a00'; g.textAlign = 'left'; g.fillText(t('geom.src.s') + ', ' + fmt(S.E0, 3) + ' MeV', 12, 22);
+    }
     function path3(p, out, dir, alpha, markers, width) {
       var pts = p.path; if (!pts || !pts.length) return;
       g.globalAlpha = alpha; g.strokeStyle = OUT_COL[out] || '#0b3d91'; g.lineWidth = width;
@@ -331,8 +422,8 @@
       for (var i = 0; i < pts.length; i++) { var q = P(pts[i][0], pts[i][1], pts[i][3] || 0); if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); }
       g.stroke();
       var last = pts[pts.length - 1];
-      if ((out === 'T' || out === 'R') && dir) {
-        var a = P(last[0], last[1], last[3] || 0), e = 0.7 * T;
+      if ((out === 'T' || out === 'R' || out === 'L') && dir) {
+        var a = P(last[0], last[1], last[3] || 0), e = (sph ? 0.25 : 0.7) * T;
         var d = P(last[0] + dir[0] * e, last[1] + dir[1] * e, (last[3] || 0) + dir[2] * e);
         g.setLineDash([3, 3]); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(d[0], d[1]); g.stroke(); g.setLineDash([]);
       }
@@ -364,6 +455,7 @@
         }
       }
     }
+    if (sph) sphereSrc3();
     // axes gizmo
     var ax = 36, ay = H - 36, axes = [['z', 1, 0, 0, '#111'], ['x', 0, 1, 0, '#2e7d32'], ['y', 0, 0, 1, '#1565c0']];
     axes.forEach(function (a) {
@@ -377,6 +469,7 @@
 
   /* ---------------- tallies ---------------- */
   function updateTallies() {
+    if (S.example === 'sphere') return updateTalliesSphere();
     var sim = S.sim, ta = sim.tally, s = MC.summary(sim);
     function row(label, f, cls) {
       return '<tr class="' + (cls || '') + '"><td>' + label + '</td><td>' + pct(f.p) + (f.n ? ' ± ' + (100 * f.err).toFixed(1) + ' %' : '') + '</td></tr>';
@@ -398,6 +491,50 @@
     h += '</table>';
     $('tallyTable').innerHTML = h;
     drawSpectrum(s);
+  }
+
+  function updateTalliesSphere() {
+    var sim = S.sim, ta = sim.tally, s = MC.summary(sim);
+    function row(label, f, cls) {
+      return '<tr class="' + (cls || '') + '"><td>' + label + '</td><td>' + pct(f.p) + (f.n ? ' ± ' + (100 * f.err).toFixed(1) + ' %' : '') + '</td></tr>';
+    }
+    var h = '<table class="tally">';
+    h += '<tr><td>' + t('tally.N') + '</td><td>' + ta.N + '</td></tr>';
+    h += row('<b>' + t('sph.leak') + '</b>', s.leaked);
+    h += row(t('sph.unc'), s.uncollided, 'sub');
+    h += '<tr class="sub"><td>' + t('sph.analytic') + '</td><td>' + pct(s.analyticUncollided) + '</td></tr>';
+    h += row(t('sph.scat'), s.scattered, 'sub');
+    h += row(t('sph.abs'), s.absorbed);
+    h += '<tr class="sub"><td>' + t('rx.cap.s') + ' / ' + t('rx.oth.s') + '</td><td>' + ta.absBy[2] + ' / ' + ta.absBy[3] + '</td></tr>';
+    h += '<tr><td>' + t('sph.coll') + '</td><td>' + (ta.N ? fmt(s.collMean, 4) : '–') + '</td></tr>';
+    h += '<tr><td>' + t('sph.flux') + '<br><span style="color:#5b6573;font-size:11px">' + t('sph.flux.u') + '</span></td><td>' +
+      (ta.N ? fmt(s.flux, 4) + ' ± ' + fmt(s.fluxErr, 2) : '–') + '</td></tr>';
+    h += '<tr><td>' + t('tally.int') + '</td><td>' + RX_KEY.map(function (k, i) {
+      return '<span class="sw" style="background:' + RX_COL[i] + '"></span>' + ta.byReaction[i];
+    }).join(' &nbsp;') + '</td></tr>';
+    h += '</table>';
+    $('tallyTable').innerHTML = h;
+    drawSpectrum(s); drawFluxSpectrum();
+  }
+
+  /* bottom plot: flux spectrum in the sphere, volume average, per unit lethargy: E phi(E) with +-1 sigma bars */
+  function drawFluxSpectrum() {
+    if (S.example !== 'sphere' || !S.sim || !S.sim.sphere) return;
+    var sp = MC.fluxSpectrum(S.sim), N = S.sim.tally.N, bars = [], errs = [], ymax = 0, ymin = Infinity, log = S.fluxLog;
+    sp.forEach(function (b) {
+      if (!(b.y > 0)) return;
+      bars.push({ x0: b.e0, x1: b.e1, y: b.y, color: '#1e88e5' });
+      if (b.y > ymax) ymax = b.y; if (b.y < ymin) ymin = b.y;
+      if (N > 1 && b.err > 0) errs.push({ x: Math.sqrt(b.e0 * b.e1), y0: Math.max(b.y - b.err, b.y * 1e-3), y1: b.y + b.err });
+    });
+    if (ymax <= 0) { ymax = 1; ymin = 1e-3; }
+    var yl = log ? [Math.pow(10, Math.floor(Math.log10(Math.max(ymin, ymax * 1e-8)))), Math.pow(10, Math.ceil(Math.log10(ymax * 1.2)))] : [0, ymax * 1.12];
+    var ytop = log ? yl[1] / 1.7 : ymax * 1.12 * 0.93, vl = [{ x: 2.53e-8, color: '#6b7280', dash: [4, 4], width: 1.2 }], texts = [{ x: 2.53e-8, y: ytop, text: t('flux.th'), color: '#6b7280', dx: 6, align: 'left' }];
+    if (N) {
+      vl.push({ x: S.E0, color: '#c62828', width: 2, dash: [] });
+      texts.push({ x: S.E0, y: ytop, text: t('flux.src', { E: fmt(S.E0, 3) }), color: '#c62828', dx: -6, align: 'right' });
+    }
+    fluxPlot.draw({ ml: 88, xlog: true, ylog: log, xlim: [1e-9, 30], ylim: yl, xlabel: t('flux.x'), ylabel: t('flux.y'), bars: bars, errbars: errs, vlines: vl, texts: texts });
   }
 
   function drawSpectrumN(s) {
@@ -441,11 +578,11 @@
     if (!S.running) return;
     var sim = S.sim, t0 = performance.now(), n = 0;
     while (sim.tally.N < S.nHist && performance.now() - t0 < 14) {
-      sim.record = n < 20; n++;
+      sim.record = n < (S.example === 'sphere' ? 6 : 20); n++;
       var r = MC.runHistory(sim);
       if (sim.record) {
         S.finished.push({ path: r.ph.path, out: r.out, u: r.ph.u, v: r.ph.v, w: r.ph.w });
-        if (S.finished.length > 250) S.finished.shift();
+        if (S.finished.length > (S.example === 'sphere' ? 90 : 250)) S.finished.shift();
       }
     }
     sim.record = false;
@@ -512,7 +649,9 @@
     var sig = ev.sig, mat = S.mat;
     switch (ev.type) {
       case 'birth':
-        title = t('step.birth.title'); text = t(ev.srcLen > 0 ? 'step.birth.text.line' : 'step.birth.text', { E: fmt(E) });
+        title = t('step.birth.title');
+        text = ev.iso ? t('step.birth.text', { E: fmt(E), mu: fmt(ev.mu, 4), th: fmt(Math.acos(ev.mu) * 180 / Math.PI, 4), phi: fmt(ev.phi * 180 / Math.PI, 4) })
+                      : t(ev.srcLen > 0 ? 'step.birth.text.line' : 'step.birth.text', { E: fmt(E) });
         if (ev.srcLen > 0) text += t('step.birth.line', { A: 'x', L: fmt(ev.srcLen, 3), z: fmt(ph.y, 4) });
         break;
       case 'xs_total':
@@ -526,7 +665,7 @@
       case 'move':
         title = t('step.move.title');
         text = t(ev.out ? 'step.move.' + ev.out : 'step.move.in',
-          { s: fmt(ev.s), db: fmt(ev.db), x: fmt(ph.x), y: fmt(ph.y), u: fmt(ph.u), E: fmt(ph.E) });
+          { s: fmt(ev.s), db: fmt(ev.db), x: fmt(ph.x), y: fmt(ph.y), z: fmt(ph.z), r: fmt(Math.sqrt(ph.x * ph.x + ph.y * ph.y + ph.z * ph.z)), u: fmt(ph.u), E: fmt(ph.E) });
         break;
       case 'xs_partial':
         title = t('step.xs_partial.title');
@@ -794,7 +933,7 @@
     cv.addEventListener('wheel', function (e) {
       if (S.view === '3d') return; e.preventDefault();
       var r = cv.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top, W = r.width, H = r.height;
-      var base = W * 0.38 / S.T, sOld = base * cam2.zoom, x0 = W * 0.31;
+      var vp = view2(W, H), base = vp.base, sOld = base * cam2.zoom, x0 = vp.x0;
       var wx = (cx - x0 - cam2.px) / sOld, wy = (H / 2 + cam2.py - cy) / sOld;   // world point under the cursor
       cam2.zoom = Math.max(0.2, Math.min(60, cam2.zoom * Math.exp(-e.deltaY * 0.001)));
       var sNew = base * cam2.zoom;
@@ -818,6 +957,14 @@
   document.querySelectorAll('#particleToggle button').forEach(function (b) {
     b.addEventListener('click', function () { setParticle(b.dataset.particle); });
   });
+  document.querySelectorAll('#exToggle button').forEach(function (b) { b.addEventListener('click', function () { setExample(b.dataset.ex); }); });
+  document.querySelectorAll('#fluxScale button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      S.fluxLog = b.dataset.yscale === 'log';
+      document.querySelectorAll('#fluxScale button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      drawFluxSpectrum();
+    });
+  });
   $('btnReset').addEventListener('click', resetSim);
   $('btnNext').addEventListener('click', stepNext);
   $('btnNextP').addEventListener('click', stepNextParticle);
@@ -839,4 +986,5 @@
   applyLang();
   $('material').value = 'lead';
   resetSim();
+  if (location.hash === '#sphere') setExample('sphere');          // direct link to example 2
 })();

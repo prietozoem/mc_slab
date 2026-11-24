@@ -9,6 +9,10 @@
  *            - Incoherent: Klein-Nishina on a free electron at rest (Kahn's rejection).
  *            - Coherent: Thomson x (simple Gaussian form factor) -> forward peaked.
  *
+ * Example 2 (neutrons only): isotropic point source at the centre of a homogeneous sphere of radius R in
+ * vacuum (makeSim with geom:'sphere'). Tallies: leakage, absorption and the volume-averaged flux spectrum in
+ * the sphere (track-length estimator, with per-bin statistical errors from the history-to-history scatter).
+ *
  * The same physics functions are used by the fast loop (runHistory) and by the
  * step-by-step generator (historySteps). With the same seed both produce identical results.
  */
@@ -173,15 +177,19 @@
       byReaction: [0, 0, 0, 0],           // interactions of each type
       cutoff: 0,
       flux: 0, flux2: 0,                  // sum of 1/u at the exit face (scalar flux estimator)
+      leaked: 0, coll: 0,                 // sphere example: neutrons that left the sphere, total number of collisions
+      fl: new Float64Array(nbins), fl2: new Float64Array(nbins), hist: new Float64Array(nbins),   // sphere: track length per bin (sum, sum of squares over histories, current history)
+      trk: 0, trk2: 0, ht: 0,             // sphere: total track length (sum, sum of squares, current history)
       nbins: nbins, spec: new Float64Array(nbins)   // collided transmitted particles: linear bins in [0, E0] (photons) or log bins in [1e-11, 20] MeV (neutrons)
     };
   }
 
   /* ---------- simulation object ---------- */
   function makeSim(opts) {
-    var mat = opts.material;
+    var mat = opts.material, sph = opts.geom === 'sphere';
     return {
-      mat: mat, E0: opts.E0, T: opts.T, rng: makeRNG(opts.seed || 1),
+      sphere: sph, R: sph ? opts.R : 0,
+      mat: mat, E0: opts.E0, T: sph ? opts.R : opts.T, rng: makeRNG(opts.seed || 1),
       srcLen: 0, srcAxis: 'z', srcX0: 0,   // line source: length [cm] (0 = pencil beam), axis, position x0 (see configureSource)
       tally: makeTally(opts.E0, opts.nbins, opts.material.particle === 'neutron'),
       neutron: opts.material.particle === 'neutron', record: false, history: 0
@@ -204,6 +212,11 @@
        axis 'z': x = x0, y = 0, -L/2 <= z <= L/2 */
   function newPhoton(E0, sim) {
     var ph = { x: 0, y: 0, z: 0, u: 1, v: 0, w: 0, E: E0, nc: 0, path: null };
+    if (sim && sim.sphere) {                          // isotropic point source at the centre: cos(theta) = 2 xi1 - 1, phi = 2 pi xi2 (u is the displayed z axis)
+      var m0 = 2 * sim.rng() - 1, f0 = 2 * Math.PI * sim.rng(), s0 = Math.sqrt(Math.max(0, 1 - m0 * m0));
+      ph.u = m0; ph.v = s0 * Math.cos(f0); ph.w = s0 * Math.sin(f0); ph.mu0 = m0; ph.phi0 = f0;
+      return ph;
+    }
     if (sim && sim.srcLen > 0) {
       var r = sim.rng(), L = sim.srcLen;
       ph.x = sim.srcX0;
@@ -233,6 +246,24 @@
     return null;
   }
 
+  /* ---- sphere geometry: distance to the surface along the flight direction, flight with track-length scoring ---- */
+  function distSphere(ph, R) {
+    var b = ph.x * ph.u + ph.y * ph.v + ph.z * ph.w, c = ph.x * ph.x + ph.y * ph.y + ph.z * ph.z - R * R;
+    return -b + Math.sqrt(Math.max(0, b * b - c));
+  }
+  function ebin(t, E) {
+    var b = Math.floor((Math.log(Math.max(E, NE_MIN)) - t.lmin) / (t.lmax - t.lmin) * t.nbins);
+    return b < 0 ? 0 : b >= t.nbins ? t.nbins - 1 : b;
+  }
+  function transportS(sim, ph, s) {                   // returns 'L' (leaked) or null; scores the track length at the flight energy
+    var db = distSphere(ph, sim.R), out = null, len = s, t = sim.tally;
+    if (s >= db) { len = db; out = 'L'; }
+    t.hist[ebin(t, ph.E)] += len; t.ht += len;
+    ph.x += ph.u * len; ph.y += ph.v * len; ph.z += ph.w * len;
+    if (out && ph.path) ph.path.push([ph.x, ph.y, 'L', ph.z]);
+    return out;
+  }
+
   /* perform interaction r on photon; returns info {absorbed, ...} */
   function interact(sim, ph, r) {
     var rng = sim.rng, info = { r: r, absorbed: false, Ein: ph.E };
@@ -260,7 +291,17 @@
   }
 
   function finish(sim, ph, out) {
-    var t = sim.tally;
+    var t = sim.tally, i;
+    if (sim.sphere) {
+      t.N++; sim.history++; t.coll += ph.nc;
+      for (i = 0; i < t.nbins; i++) { var h = t.hist[i]; if (h !== 0) { t.fl[i] += h; t.fl2[i] += h * h; t.hist[i] = 0; } }
+      t.trk += t.ht; t.trk2 += t.ht * t.ht; t.ht = 0;
+      if (out === 'L') {
+        t.leaked++;
+        if (ph.nc === 0) t.uncollided++; else t.spec[ebin(t, ph.E)]++;
+      } else { t.absorbed++; if (out === 'C') t.cutoff++; }
+      return;
+    }
     t.N++; sim.history++;
     if (out === 'T') {
       t.transmitted++;
@@ -606,13 +647,13 @@
 
   var N_MAX_COLLISIONS = 200000;
   function runHistoryN(sim) {
-    var ph = newPhoton(sim.E0, sim), mat = sim.mat, rng = sim.rng, T = sim.T;
+    var ph = newPhoton(sim.E0, sim), mat = sim.mat, rng = sim.rng, T = sim.T, sph = sim.sphere;
     if (sim.record) ph.path = [[ph.x, ph.y, 'S', ph.z]];
     for (;;) {
       if (ph.nc > N_MAX_COLLISIONS) { finish(sim, ph, 'C'); return { out: 'C', ph: ph }; }
       var sig = mat.macro(ph.E);
       var s = sampleFlight(rng(), sig.tot);
-      var out = transport(ph, s, T);
+      var out = sph ? transportS(sim, ph, s) : transport(ph, s, T);
       if (out) { finish(sim, ph, out); return { out: out, ph: ph }; }
       var ni = mat.single ? 0 : pickIndex(rng(), sig.nucTot, sig.tot);
       var r = pickIndex(rng(), sig.nucArr[ni], sig.nucTot[ni]);
@@ -621,18 +662,18 @@
     }
   }
   function* historyStepsN(sim) {
-    var ph = newPhoton(sim.E0, sim), mat = sim.mat, rng = sim.rng, T = sim.T;
+    var ph = newPhoton(sim.E0, sim), mat = sim.mat, rng = sim.rng, T = sim.T, sph = sim.sphere;
     ph.path = [[ph.x, ph.y, 'S', ph.z]];
-    yield { type: 'birth', ph: ph, n: sim.history + 1, srcLen: sim.srcLen, srcAxis: sim.srcAxis };
+    yield { type: 'birth', ph: ph, n: sim.history + 1, srcLen: sim.srcLen, srcAxis: sim.srcAxis, iso: sph, mu: ph.mu0, phi: ph.phi0 };
     for (;;) {
       if (ph.nc > N_MAX_COLLISIONS) { finish(sim, ph, 'C'); yield { type: 'end', out: 'C', ph: ph }; return; }
       var sig = mat.macro(ph.E);
       yield { type: 'xs_total', ph: ph, sig: sig };
       var xi = rng(), s = sampleFlight(xi, sig.tot);
-      var db = ph.u > 0 ? (T - ph.x) / ph.u : (0 - ph.x) / ph.u;
+      var db = sph ? distSphere(ph, sim.R) : ph.u > 0 ? (T - ph.x) / ph.u : (0 - ph.x) / ph.u;
       yield { type: 'flight', ph: ph, sig: sig, xi: xi, s: s, db: db };
       var from = [ph.x, ph.y];
-      var out = transport(ph, s, T);
+      var out = sph ? transportS(sim, ph, s) : transport(ph, s, T);
       yield { type: 'move', ph: ph, from: from, s: s, db: db, out: out };
       if (out) { finish(sim, ph, out); yield { type: 'end', out: out, ph: ph }; return; }
       yield { type: 'xs_partial', ph: ph, sig: sig };
@@ -660,8 +701,30 @@
     return Math.exp(-mu * (T - x0));
   }
 
+  /* volume-averaged flux spectrum in the sphere per unit lethargy, E phi(E) [per source neutron and cm^2], with 1-sigma errors */
+  function fluxSpectrum(sim) {
+    var t = sim.tally, N = t.N, nb = t.nbins, V = 4 / 3 * Math.PI * Math.pow(sim.R, 3), dl = (t.lmax - t.lmin) / nb, out = [], i;
+    for (i = 0; i < nb; i++) {
+      var m = N ? t.fl[i] / N : 0, v = N > 1 ? Math.max(0, t.fl2[i] / N - m * m) / (N - 1) : 0;
+      out.push({ e0: Math.exp(t.lmin + i * dl), e1: Math.exp(t.lmin + (i + 1) * dl), y: m / (V * dl), err: Math.sqrt(v) / (V * dl) });
+    }
+    return out;
+  }
+  function summarySphere(sim, mu) {
+    var t = sim.tally, N = t.N, V = 4 / 3 * Math.PI * Math.pow(sim.R, 3);
+    function frac(n) { var p = N ? n / N : 0; return { p: p, err: N && p > 0 ? Math.sqrt((1 - p) / (N * p)) : 0, n: n }; }
+    var fm = N ? t.trk / N : 0, fv = N > 1 ? Math.max(0, t.trk2 / N - fm * fm) / (N - 1) : 0;
+    return {
+      N: N, sigT0: mu, mfp: 1 / mu, thickness_mfp: sim.R * mu, V: V,
+      leaked: frac(t.leaked), uncollided: frac(t.uncollided), scattered: frac(t.leaked - t.uncollided), absorbed: frac(t.absorbed),
+      analyticUncollided: Math.exp(-mu * sim.R), collMean: N ? t.coll / N : 0,
+      flux: fm / V, fluxErr: Math.sqrt(fv) / V
+    };
+  }
+
   function summary(sim) {
     var t = sim.tally, N = t.N, mu = sim.mat.macro(sim.E0).tot;
+    if (sim.sphere) return summarySphere(sim, mu);
     function frac(n) {
       var p = N ? n / N : 0;
       return { p: p, err: N && p > 0 ? Math.sqrt((1 - p) / (N * p)) : 0, n: n };   // err = relative error
@@ -684,7 +747,7 @@
     sampleFlight: sampleFlight, sampleReaction: sampleReaction,
     sampleCompton: sampleCompton, sampleRayleigh: sampleRayleigh, rotate: rotate,
     kleinNishinaPDF: kleinNishinaPDF, rayleighPDF: rayleighPDF,
-    runHistory: runHistory, historySteps: historySteps, summary: summary,
+    runHistory: runHistory, historySteps: historySteps, summary: summary, fluxSpectrum: fluxSpectrum, distSphere: distSphere,
     makeNeutronMaterial: makeNeutronMaterial, N_RECIPES: N_RECIPES, N_REACTIONS: N_REACTIONS, NE_MIN: NE_MIN, NE_MAX: NE_MAX,
     makeThermal: makeThermal, E_THERMAL: E_THERMAL, sampleElastic: sampleElastic, sampleInelastic: sampleInelastic, evalCurve: evalCurve, prepCurve: prepCurve
   };

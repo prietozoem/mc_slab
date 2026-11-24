@@ -29,7 +29,7 @@
     var g = cv.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    var m = { l: 62, r: 14, t: o.title ? 26 : 12, b: 44 };
+    var m = { l: o.ml || 62, r: 14, t: o.title ? 26 : 12, b: 44 };
     var pw = W - m.l - m.r, ph = H - m.t - m.b;
     var xl = o.xlim, yl = o.ylim;
     var tx = o.xlog ? Math.log10 : function (v) { return v; };
@@ -71,6 +71,10 @@
     (o.bars || []).forEach(function (b) {          // {x0,x1,y,color}
       var a = X(b.x0), c = X(b.x1), top = Y(b.y), bot = Y(yl[0]);
       g.fillStyle = b.color; g.fillRect(a, top, Math.max(1, c - a - 0.5), bot - top);
+    });
+    (o.errbars || []).forEach(function (e) {        // {x, y0, y1, color}: vertical error bar
+      var px = X(e.x); g.strokeStyle = e.color || '#37474f'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(px, Y(e.y1)); g.lineTo(px, Y(e.y0)); g.stroke();
     });
     (o.lines || []).forEach(function (L) {
       g.strokeStyle = L.color; g.lineWidth = L.width || 1.6; g.setLineDash(L.dash || []);
