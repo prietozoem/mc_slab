@@ -151,13 +151,19 @@
     $('btnRun').disabled = false; $('btnPause').disabled = true;
   }
 
+  function newSim() {                                              // a fresh simulation with the current parameters (same seed -> same random sequence)
+    var sph = S.example === 'sphere';
+    var sim = MC.makeSim({ material: S.mat, E0: S.E0, T: S.T, R: S.T, geom: sph ? 'sphere' : 'slab', seed: S.seed, nbins: S.particle === 'neutron' ? 200 : 100 });
+    if (!sph) MC.configureSource(sim, S.srcLen, S.srcAxis, S.srcX0);
+    return sim;
+  }
   function resetSim() {
     stopAll(); readParams();
-    var sph = S.example === 'sphere';
-    S.sim = MC.makeSim({ material: S.mat, E0: S.E0, T: S.T, R: S.T, geom: sph ? 'sphere' : 'slab', seed: S.seed, nbins: S.particle === 'neutron' ? 200 : 100 });
-    if (!sph) { MC.configureSource(S.sim, S.srcLen, S.srcAxis, S.srcX0); S.srcLen = S.sim.srcLen; S.srcX0 = S.sim.srcX0; }   // clamped values
+    S.sim = newSim();
+    if (S.example !== 'sphere') { S.srcLen = S.sim.srcLen; S.srcX0 = S.sim.srcX0; }   // clamped values
     
-    S.gen = null; S.ev = null; S.current = null; S.finished = []; S.winRender = null;
+    S.gen = null; S.ev = null; S.current = null; S.finished = []; S.winRender = null; S.actions = [];
+    updatePrevBtn();
     if (S.mode === 'step') showReady(); else $('win').hidden = true;
     updateInfo(); drawGeom(); updateTallies();
   }
@@ -607,24 +613,40 @@
   }
   function startHistory() { archiveCurrent(); S.gen = MC.historySteps(S.sim); }
 
-  function handleEvent(ev) {
+  /* One user action ('n' = next step, 'p' = next particle) advances the simulation and returns the event to show.
+     The actions are logged: "previous step" rebuilds the state by replaying the log minus its last action from a fresh
+     simulation with the same seed (the random sequence is deterministic, so the rebuilt state is identical). */
+  function advance(kind) {
+    var ev, r;
+    if (kind === 'p') {
+      if (S.gen) {
+        r = S.gen.next();
+        while (!r.done) { if (r.value.type === 'end') S.current.out = r.value.out; r = S.gen.next(); }
+      }
+      startHistory();
+      ev = S.gen.next().value;
+    } else {
+      r = S.gen ? S.gen.next() : { done: true };
+      if (r.done) { startHistory(); r = S.gen.next(); }
+      ev = r.value;
+    }
     S.ev = ev;
     if (ev.type === 'birth') S.current = { ph: ev.ph, out: null };
     if (ev.type === 'end') S.current.out = ev.out;
-    showWindow(ev); drawGeom(ev); updateTallies();
+    return ev;
   }
-  function stepNext() {
-    var r = S.gen ? S.gen.next() : { done: true };
-    if (r.done) { startHistory(); r = S.gen.next(); }
-    handleEvent(r.value);
-  }
-  function stepNextParticle() {
-    if (S.gen) {
-      var r = S.gen.next();
-      while (!r.done) { if (r.value.type === 'end') S.current.out = r.value.out; r = S.gen.next(); }
-    }
-    startHistory();
-    handleEvent(S.gen.next().value);
+  function showStep(ev) { showWindow(ev); drawGeom(ev); updateTallies(); }
+  function updatePrevBtn() { $('btnPrev').disabled = !S.actions || S.actions.length === 0; }
+  function stepNext() { var ev = advance('n'); S.actions.push('n'); updatePrevBtn(); showStep(ev); }
+  function stepNextParticle() { var ev = advance('p'); S.actions.push('p'); updatePrevBtn(); showStep(ev); }
+  function stepPrev() {
+    if (!S.actions.length) return;
+    if (S.timer) stopAll();                                        // stop the continuous run
+    var acts = S.actions.slice(0, -1);
+    S.sim = newSim(); S.gen = null; S.ev = null; S.current = null; S.finished = []; S.actions = [];
+    acts.forEach(function (a) { advance(a); S.actions.push(a); });
+    updatePrevBtn();
+    if (S.ev) showStep(S.ev); else { showReady(); drawGeom(); updateTallies(); }
   }
   function toggleContinuous() {
     if (S.timer) { stopAll(); return; }
@@ -967,6 +989,7 @@
     });
   });
   $('btnReset').addEventListener('click', resetSim);
+  $('btnPrev').addEventListener('click', stepPrev);
   $('btnNext').addEventListener('click', stepNext);
   $('btnNextP').addEventListener('click', stepNextParticle);
   $('btnCont').addEventListener('click', toggleContinuous);
@@ -978,7 +1001,8 @@
     if (S.mode !== 'step') return;
     var tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-    if (e.code === 'Space') { e.preventDefault(); stepNext(); }
+    if (e.code === 'Space' || e.key === 'ArrowRight') { e.preventDefault(); stepNext(); }
+    else if (e.key === 'b' || e.key === 'B' || e.key === 'ArrowLeft') { e.preventDefault(); stepPrev(); }
     else if (e.key === 'p' || e.key === 'P') stepNextParticle();
   });
   window.addEventListener('resize', function () { drawGeom(); updateTallies(); if (S.winRender && !$('win').hidden) S.winRender(); });

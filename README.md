@@ -17,6 +17,8 @@ Interface in English and Spanish (toggle at the top right).
 
   Buttons: **Next step** (Space), **Next particle** (P: finishes the current history and starts the next), **Run continuously** (with an adjustable delay).
 
+  **Previous step** (B or ←) goes back one action (it also undoes a *Next particle* jump). It works by replaying the logged actions from a fresh simulation with the same seed, which gives exactly the same state because the random sequence is deterministic; the tallies, the drawn trajectories and the window go back with it. Changing any parameter or pressing Reset clears the log.
+
 ## Physics and approximations
 
 - Geometry: slab 0 ≤ z ≤ T, infinite in x and y (in the code the thickness axis is called x, and the displayed x, y are code y, z). Source on the entrance face, monodirectional along +z: a **pencil beam** (point) or a **line source**: a segment of length ΔX on the entrance face (z = 0), emission points uniform on it. Views: 2D z–x, 2D z–y (wheel: zoom about the cursor, drag: pan, double-click: reset) and an orbitable 3D view of the full 3D transport.
