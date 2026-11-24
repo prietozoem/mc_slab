@@ -126,6 +126,7 @@
     $('particleLabel').hidden = $('particleToggle').hidden = sph;      // the sphere example is neutrons only
     $('srctypeRow').hidden = sph;                                      // the source is always an isotropic point at the centre
     $('fluxPanel').hidden = !sph;
+    $('specTitle').hidden = $('spec').hidden = sph;                    // example 2 has no slab-style output spectrum
     $('geomLegend').dataset.lang = '';
   }
   function setExample(ex) {
@@ -514,7 +515,7 @@
     }).join(' &nbsp;') + '</td></tr>';
     h += '</table>';
     $('tallyTable').innerHTML = h;
-    drawSpectrum(s); drawFluxSpectrum();
+    drawFluxSpectrum();
   }
 
   /* bottom plot: flux spectrum in the sphere, volume average, per unit lethargy: E phi(E) with +-1 sigma bars */
