@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monte Carlo photon transport: slab shielding</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1 data-i18n="app.title"></h1>
+    <p class="sub" data-i18n="app.subtitle"></p>
+  </div>
+  <div class="lang" role="group" aria-label="Language">
+    <button data-lang="en" class="on">EN</button><button data-lang="es">ES</button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="panel" id="controls">
+    <h2 data-i18n="ctl.title"></h2>
+    <div class="seglabel" data-i18n="ctl.particle"></div>
+    <div class="segtoggle" id="particleToggle" role="group">
+      <button data-particle="photon" class="on" data-i18n="ctl.photon"></button><button data-particle="neutron" data-i18n="ctl.neutron"></button>
+    </div>
+    <p class="info warn" id="dataMsg" hidden></p>
+    <label><span data-i18n="ctl.material"></span>
+      <select id="material"></select></label>
+    <label><span data-i18n="ctl.energy"></span>
+      <input id="energy" type="number" min="0.001" max="100" step="any" value="1"></label>
+    <label><span data-i18n="ctl.thickness"></span>
+      <input id="thickness" type="number" min="0.001" step="any" value="4"></label>
+    <div class="info" id="mfpInfo"></div>
+    <label class="radio" id="tslRow" hidden><input type="checkbox" id="tslChk" checked> <span data-i18n="ctl.tsl"></span></label>
+    <label><span data-i18n="ctl.srctype"></span>
+      <select id="srctype"><option value="beam" data-i18n="ctl.src.beam"></option><option value="line" data-i18n="ctl.src.line"></option></select></label>
+    <label id="srclenRow" hidden><span data-i18n="ctl.srclen"></span>
+      <input id="srclen" type="number" min="0.001" step="any" value="4"></label>
+    <label><span data-i18n="ctl.histories"></span>
+      <input id="nhist" type="number" min="1" step="1" value="20000"></label>
+    <label><span data-i18n="ctl.seed"></span>
+      <input id="seed" type="number" min="1" step="1" value="12345"></label>
+
+    <fieldset class="modes">
+      <legend data-i18n="ctl.mode"></legend>
+      <label class="radio"><input type="radio" name="mode" value="auto" checked> <span data-i18n="ctl.auto"></span></label>
+      <label class="radio"><input type="radio" name="mode" value="step"> <span data-i18n="ctl.step"></span></label>
+    </fieldset>
+
+    <div id="autoBtns" class="btns">
+      <button id="btnRun" class="primary" data-i18n="btn.run"></button>
+      <button id="btnPause" data-i18n="btn.pause" disabled></button>
+    </div>
+    <div id="stepBtns" class="btns" hidden>
+      <button id="btnShowWin" data-i18n="btn.showwin"></button>
+    </div>
+    <div class="btns"><button id="btnReset" data-i18n="btn.reset"></button></div>
+    <p class="hint" id="hint"></p>
+  </section>
+
+  <section class="panel" id="geomPanel">
+    <div class="panelhead">
+      <h2 data-i18n="geom.title"></h2>
+      <div class="viewtoggle" role="group">
+        <button data-view="2d" class="on" data-i18n="view.2d"></button><button data-view="2dz" data-i18n="view.2dz"></button><button data-view="3d" data-i18n="view.3d"></button>
+      </div>
+    </div>
+    <canvas id="geom"></canvas>
+    <div class="legend" id="geomLegend"></div>
+  </section>
+
+  <section class="panel" id="tallies">
+    <h2 data-i18n="tally.title"></h2>
+    <div id="tallyTable"></div>
+    <h3 data-i18n="spec.title"></h3>
+    <canvas id="spec"></canvas>
+  </section>
+</main>
+
+<section class="notes">
+  <h3 data-i18n="foot.title"></h3>
+  <ul>
+    <li data-i18n="foot.1"></li><li data-i18n="foot.2"></li><li data-i18n="foot.3"></li>
+    <li data-i18n="foot.4"></li><li data-i18n="foot.5"></li>
+  </ul>
+</section>
+
+<!-- Floating step window (draggable, resizable) -->
+<div id="win" class="floatwin" hidden>
+  <div class="winbar" id="winbar">
+    <span id="winTitle"></span>
+    <span class="badge" id="winHist"></span>
+    <button id="winClose" title="close" aria-label="close">×</button>
+  </div>
+  <div class="wincontrols" id="winCtl">
+    <button id="btnNext" class="primary" data-i18n="btn.next"></button>
+    <button id="btnNextP" data-i18n="btn.nextp"></button>
+    <button id="btnCont" data-i18n="btn.cont"></button>
+    <label class="speed"><span data-i18n="ctl.speed"></span>
+      <input id="delay" type="range" min="50" max="2000" step="50" value="700"><output id="delayOut">700 ms</output></label>
+  </div>
+  <canvas id="winCanvas"></canvas>
+  <div id="winText" class="wintext"></div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/plot.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
